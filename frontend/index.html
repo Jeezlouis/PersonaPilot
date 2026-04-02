@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Job Automater — AI-Powered Job Search</title>
+  <meta name="description" content="Intelligent job search and application automation. Find, rank, and apply to the right jobs with the right resume." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── Sidebar ──────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">🎯</div>
+      <span>Job Automater</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-item active" data-page="dashboard" id="nav-dashboard">
+        <span class="nav-icon">📊</span>
+        Dashboard
+      </div>
+      <div class="nav-item" data-page="jobs" id="nav-jobs">
+        <span class="nav-icon">💼</span>
+        Jobs
+      </div>
+      <div class="nav-item" data-page="tracker" id="nav-tracker">
+        <span class="nav-icon">📋</span>
+        Tracker
+      </div>
+      <div class="nav-item" data-page="notifications" id="nav-notifications">
+        <span class="nav-icon">🔔</span>
+        Notifications
+        <span class="nav-badge" id="notif-badge">0</span>
+      </div>
+      <div class="nav-item" data-page="settings" id="nav-settings">
+        <span class="nav-icon">⚙️</span>
+        Settings
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="btn btn-secondary w-full" id="btn-scrape-now" style="justify-content:center;">
+        <span>🔍</span> Scan Jobs Now
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── Main Content ──────────────────────────────────────── -->
+  <div class="main-content">
+
+    <!-- Topbar -->
+    <header class="topbar">
+      <button class="menu-toggle" id="menu-toggle">☰</button>
+      <h1 class="topbar-title" id="page-title">Dashboard</h1>
+      <div class="topbar-actions">
+        <span id="topbar-status" class="text-xs text-muted"></span>
+        <div class="loading-spinner hidden" id="global-spinner"></div>
+      </div>
+    </header>
+
+    <!-- ── Dashboard ─────────────────────────────────────── -->
+    <div class="page active" id="page-dashboard">
+      <div class="stats-grid" id="dashboard-stats">
+        <div class="stat-card accent">
+          <div class="stat-label">Total Jobs</div>
+          <div class="stat-value" id="stat-total">—</div>
+          <div class="stat-sub">in database</div>
+        </div>
+        <div class="stat-card success">
+          <div class="stat-label">High Match</div>
+          <div class="stat-value" id="stat-high">—</div>
+          <div class="stat-sub">score ≥ 80</div>
+        </div>
+        <div class="stat-card warning">
+          <div class="stat-label">Pending Review</div>
+          <div class="stat-value" id="stat-pending">—</div>
+          <div class="stat-sub">applications</div>
+        </div>
+        <div class="stat-card purple">
+          <div class="stat-label">Applied</div>
+          <div class="stat-value" id="stat-applied">—</div>
+          <div class="stat-sub">total sent</div>
+        </div>
+        <div class="stat-card success">
+          <div class="stat-label">Interviews</div>
+          <div class="stat-value" id="stat-interviews">—</div>
+          <div class="stat-sub">scheduled</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Found Today</div>
+          <div class="stat-value" id="stat-today">—</div>
+          <div class="stat-sub">new listings</div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="gap:16px; margin-bottom: 16px;">
+        <!-- Category Breakdown -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">By Category</div>
+          </div>
+          <div id="category-breakdown" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+
+        <!-- Top Companies -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Top Companies</div>
+          </div>
+          <div id="top-companies" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+      </div>
+
+      <!-- Recent High-Match Jobs -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🔥 Top Matches</div>
+          <button class="btn btn-ghost btn-sm" onclick="navigateTo('jobs')">View All →</button>
+        </div>
+        <div class="jobs-list" id="top-jobs-list"></div>
+      </div>
+    </div>
+
+    <!-- ── Jobs ──────────────────────────────────────────── -->
+    <div class="page" id="page-jobs">
+      <!-- Filters -->
+      <div class="filters-bar">
+        <input id="search-input" class="search-input" type="text" placeholder="🔍  Search jobs..." />
+        <select id="filter-status" class="filter-select">
+          <option value="">All Status</option>
+          <option value="new">New</option>
+          <option value="reviewed">Reviewed</option>
+          <option value="shortlisted">Shortlisted</option>
+          <option value="skipped">Skipped</option>
+        </select>
+        <select id="filter-category" class="filter-select">
+          <option value="">All Categories</option>
+          <option value="frontend">Frontend</option>
+          <option value="backend">Backend</option>
+          <option value="fullstack">Full Stack</option>
+          <option value="ai">AI / ML</option>
+          <option value="devops">DevOps</option>
+        </select>
+        <select id="filter-type" class="filter-select">
+          <option value="">All Types</option>
+          <option value="remote">Remote</option>
+          <option value="hybrid">Hybrid</option>
+          <option value="onsite">Onsite</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" id="filter-clear">Clear</button>
+        <span class="text-xs text-muted" id="jobs-count"></span>
+      </div>
+
+      <!-- Jobs list + detail panel -->
+      <div style="display:grid;grid-template-columns:1fr;gap:16px;" id="jobs-layout">
+        <div class="jobs-list" id="jobs-list">
+          <div class="empty-state">
+            <div class="empty-state-icon">🔍</div>
+            <h3>No jobs loaded</h3>
+            <p>Click "Scan Jobs Now" to start scraping</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tracker ────────────────────────────────────────── -->
+    <div class="page" id="page-tracker">
+      <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;">
+        <p class="text-sm text-secondary">Drag applications through the pipeline</p>
+        <button class="btn btn-ghost btn-sm" id="btn-refresh-kanban">↻ Refresh</button>
+      </div>
+      <div class="kanban-board" id="kanban-board"></div>
+    </div>
+
+    <!-- ── Notifications ──────────────────────────────────── -->
+    <div class="page" id="page-notifications">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <p class="text-sm text-secondary" id="unread-label">Loading...</p>
+        <button class="btn btn-secondary btn-sm" id="btn-mark-all-read">Mark All Read</button>
+      </div>
+      <div id="notifications-list" style="display:flex;flex-direction:column;gap:10px;">
+        <div class="empty-state">
+          <div class="empty-state-icon">🔔</div>
+          <h3>No notifications yet</h3>
+          <p>Configure Telegram in Settings to receive alerts</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Settings ───────────────────────────────────────── -->
+    <div class="page" id="page-settings">
+
+      <!-- Resumes -->
+      <div class="settings-section">
+        <h2>📄 Resumes</h2>
+        <div id="resumes-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;"></div>
+        <button class="btn btn-primary" id="btn-add-resume">+ Upload Resume</button>
+      </div>
+
+      <!-- Platform Links -->
+      <div class="settings-section">
+        <h2>🔗 Platform Links</h2>
+        <p class="text-sm text-secondary mb-4">These links are automatically injected into your applications.</p>
+        <div id="links-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;"></div>
+        <button class="btn btn-secondary" id="btn-add-link">+ Add Link</button>
+      </div>
+
+      <!-- Personas -->
+      <div class="settings-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <h2 style="margin-bottom:0;border:none;">🎭 Active Personas</h2>
+          <button class="btn btn-secondary btn-sm" id="btn-add-persona">+ Add Persona</button>
+        </div>
+        <p class="text-sm text-secondary mb-4">Enable the roles you want to be considered for.</p>
+        <div id="personas-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+      </div>
+
+      <!-- System Actions -->
+      <div class="settings-section">
+        <h2>⚙️ System</h2>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btn-test-telegram">🔔 Test Telegram</button>
+          <button class="btn btn-primary" id="btn-trigger-scrape">🔍 Run Scrape Now</button>
+          <button class="btn btn-secondary" id="btn-rescore-jobs">↻ Re-Score Extracted Jobs</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-content -->
+</div><!-- /app -->
+
+<!-- ── Modals ──────────────────────────────────────────────── -->
+
+<!-- Job Detail Modal -->
+<div class="modal-overlay hidden" id="modal-job">
+  <div class="modal" style="max-width:720px;">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modal-job-title">Job Detail</h2>
+      <button class="modal-close" onclick="closeModal('modal-job')">✕</button>
+    </div>
+    <div id="modal-job-content"></div>
+  </div>
+</div>
+
+<!-- Add Resume Modal -->
+<div class="modal-overlay hidden" id="modal-resume">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title">Upload Resume</h2>
+      <button class="modal-close" onclick="closeModal('modal-resume')">✕</button>
+    </div>
+    <form id="resume-form" enctype="multipart/form-data">
+      <div class="form-group" style="background:var(--accent-glow); padding:12px; border-radius:var(--radius-sm); border:1px solid rgba(79, 142, 247, 0.3);">
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;cursor:pointer;color:var(--accent)">
+          <input type="checkbox" id="resume-auto-extract" checked />
+          ✨ Auto-extract details using AI
+        </label>
+        <p class="form-hint" style="margin-top:6px; color:var(--text-secondary);">Upload your PDF/DOCX and we'll automatically determine your skills, role type, and summary.</p>
+      </div>
+
+      <div id="manual-resume-fields" style="display:none;">
+        <div class="form-group">
+          <label class="form-label">Resume Name (Optional)</label>
+          <input type="text" id="resume-name" placeholder="e.g. Full Stack Resume 2025" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Role Type</label>
+          <select id="resume-role-type">
+            <option value="frontend">Frontend Developer</option>
+            <option value="backend">Backend Developer</option>
+            <option value="fullstack" selected>Full Stack Developer</option>
+            <option value="ai">AI / Automation Engineer</option>
+            <option value="devops">DevOps Engineer</option>
+            <option value="freelancer">Freelancer</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Skills (comma-separated)</label>
+          <input type="text" id="resume-skills" placeholder="React, TypeScript, Node.js, PostgreSQL" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Experience Summary</label>
+          <textarea id="resume-summary" rows="3" placeholder="2+ years building React apps, TypeScript specialist..."></textarea>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:16px;">
+        <label class="form-label">Resume File (PDF, DOCX, or TXT)</label>
+        <div class="upload-zone" id="resume-drop-zone">
+          <div class="upload-zone-icon">📎</div>
+          <p>Drag &amp; drop or click to select</p>
+          <span>Supports PDF, DOCX, TXT</span>
+          <input type="file" id="resume-file" accept=".pdf,.docx,.txt,.doc" style="display:none;" />
+        </div>
+        <div id="resume-file-name" class="text-xs text-muted mt-2"></div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-resume')">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="btn-save-resume">Save Resume</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Add Link Modal -->
+<div class="modal-overlay hidden" id="modal-link">
+  <div class="modal" style="max-width:460px;">
+    <div class="modal-header">
+      <h2 class="modal-title">Add Platform Link</h2>
+      <button class="modal-close" onclick="closeModal('modal-link')">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Platform</label>
+      <select id="link-platform">
+        <option value="github">GitHub</option>
+        <option value="portfolio">Portfolio</option>
+        <option value="linkedin">LinkedIn</option>
+        <option value="upwork">Upwork</option>
+        <option value="fiverr">Fiverr</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">URL</label>
+      <input type="url" id="link-url" placeholder="https://github.com/yourusername" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description (optional)</label>
+      <input type="text" id="link-desc" placeholder="My open source work" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Relevant For</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;" id="link-roles">
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" value="frontend" /> Frontend
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" value="backend" /> Backend
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" value="fullstack" /> Full Stack
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" value="ai" /> AI
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" value="freelancer" /> Freelancer
+        </label>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
+      <button class="btn btn-secondary" onclick="closeModal('modal-link')">Cancel</button>
+      <button class="btn btn-primary" id="btn-save-link">Save Link</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Persona Modal -->
+<div class="modal-overlay hidden" id="modal-persona">
+  <div class="modal" style="max-width:460px;">
+    <div class="modal-header">
+      <h2 class="modal-title">Create Persona</h2>
+      <button class="modal-close" onclick="closeModal('modal-persona')">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Persona Name (Role Category)</label>
+      <input type="text" id="persona-name" placeholder="e.g. data-scientist, project-manager" />
+      <div class="form-hint">Use a standard slug without spaces to categorise yourself.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Tone Guidance</label>
+      <input type="text" id="persona-tone" placeholder="e.g. Professional but enthusiastic about AI" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Keywords (comma-separated)</label>
+      <input type="text" id="persona-keywords" placeholder="Python, Data Science, ETL" />
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
+      <button class="btn btn-secondary" onclick="closeModal('modal-persona')">Cancel</button>
+      <button class="btn btn-primary" id="btn-save-persona">Save Persona</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<!-- Scripts -->
+<script src="/static/js/app.js"></script>
+<script src="/static/js/dashboard.js"></script>
+<script src="/static/js/jobs.js"></script>
+<script src="/static/js/tracker.js"></script>
+<script src="/static/js/notifications.js"></script>
+<script src="/static/js/settings.js"></script>
+</body>
+</html>

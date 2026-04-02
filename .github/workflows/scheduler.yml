@@ -1,0 +1,92 @@
+name: Job Automater Scheduler
+
+on:
+  schedule:
+    # Run every 6 hours (backup in case local server is down)
+    - cron: '0 0,6,12,18 * * *'
+    # Daily digest at 9am UTC
+    - cron: '0 9 * * *'
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  scrape-and-notify:
+    name: Run Scrape Pipeline
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 0,6,12,18 * * *' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scrape pipeline
+        env:
+          GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          DATABASE_URL:         sqlite+aiosqlite:///./data/job_automater.db
+          MIN_MATCH_SCORE:      60
+          MAX_APPLICATIONS_PER_DAY: 10
+          SEARCH_KEYWORDS:      "Software Engineer,Frontend Developer,Backend Developer,Full Stack Developer,AI Engineer"
+          SCRAPE_DELAY:         "2"
+          APPLICATION_MODE:     draft
+          DEBUG:                "false"
+        run: |
+          python -c "
+          import asyncio
+          from backend.scheduler import run_scrape_and_score
+          from backend.database import init_db
+          async def main():
+              await init_db()
+              await run_scrape_and_score()
+          asyncio.run(main())
+          "
+
+      - name: Upload DB artifact (preserve data)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: job-automater-db-${{ github.run_id }}
+          path: data/job_automater.db
+          retention-days: 7
+
+  daily-digest:
+    name: Send Daily Digest
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 9 * * *'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Send digest
+        env:
+          GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          DATABASE_URL:       sqlite+aiosqlite:///./data/job_automater.db
+          DEBUG:              "false"
+        run: |
+          python -c "
+          import asyncio
+          from backend.scheduler import send_daily_digest, check_follow_ups
+          from backend.database import init_db
+          async def main():
+              await init_db()
+              await send_daily_digest()
+              await check_follow_ups()
+          asyncio.run(main())
+          "

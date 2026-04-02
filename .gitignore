@@ -1,0 +1,65 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+ENV/
+
+# Environment variables
+.env
+
+# Local Databases
+data/*.db
+data/*.db-journal
+data/*.sqlite
+
+# Resumes (personal data)
+data/resumes/
+
+# Logs
+*.log
+
+# Unit test / temp scripts
+debug_gen.py
+test_gen.py
+test_gen2.py
+test_gen3.py
+test_gen_raw.py
+test_final.py
+check_limit.py
+fix_resumes.py
+test_final.py
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
