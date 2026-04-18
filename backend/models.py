@@ -40,9 +40,12 @@ class Job(Base):
     hash_id = Column(String(64), unique=True, index=True) # dedup hash
     tags = Column(JSON, default=list)
     raw_data = Column(JSON, nullable=True)
+    contact_email = Column(String(256), nullable=True)
+    contact_confidence = Column(String(32), default="none")  # "direct", "inferred", "none"
 
-    applications = relationship("Application", back_populates="job")
-    notifications = relationship("Notification", back_populates="job")
+    applications = relationship("Application", back_populates="job", cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="job", cascade="all, delete-orphan")
+    outreach = relationship("EmailOutreach", back_populates="job", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_jobs_status_score", "status", "match_score"),
@@ -189,3 +192,79 @@ class SchedulerRun(Base):
     jobs_new = Column(Integer, default=0)
     errors = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+
+
+# ─────────────────────────────────────────────
+# 9. Pending Jobs (Queue)
+# ─────────────────────────────────────────────
+class PendingJob(Base):
+    __tablename__ = "pending_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    raw_data = Column(JSON, nullable=False)           # JSON blob from scraper
+    source = Column(String(64), nullable=False)
+    queued_at = Column(DateTime(timezone=True), default=utcnow)
+    attempts = Column(Integer, default=0)
+    last_error = Column(Text, nullable=True)
+    status = Column(String(32), default="pending")    # pending | processing | done | failed
+
+
+# ─────────────────────────────────────────────
+# 10. Embedding Cache
+# ─────────────────────────────────────────────
+class EmbeddingCache(Base):
+    __tablename__ = "embeddings_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_id = Column(String(256), nullable=False)   # job_id or resume_id
+    source_type = Column(String(32), nullable=False)  # job | resume
+    vector = Column(JSON, nullable=False)             # vector as list
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+# ─────────────────────────────────────────────
+# 11. Scrape Runs
+# ─────────────────────────────────────────────
+class ScrapeRun(Base):
+    __tablename__ = "scrape_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String(64), nullable=False)
+    started_at = Column(DateTime(timezone=True), default=utcnow)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    jobs_found = Column(Integer, default=0)
+    jobs_new = Column(Integer, default=0)
+    jobs_deduplicated = Column(Integer, default=0)
+    error = Column(Text, nullable=True)
+    status = Column(String(32), default="running")    # running | success | failed
+
+# ─────────────────────────────────────────────
+# 12. Email Outreach
+# ─────────────────────────────────────────────
+class EmailOutreach(Base):
+    __tablename__ = "email_outreach"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
+    recipient_email = Column(String(256), nullable=False)
+    subject = Column(String(256), nullable=False)
+    body = Column(Text, nullable=True)
+    body_preview = Column(String(100), nullable=True)
+    resume_used = Column(String(512), nullable=True)
+    sent_at = Column(DateTime(timezone=True), default=utcnow)
+    status = Column(String(32), default="drafted") # drafted|sent|bounced|replied
+    gmail_message_id = Column(String(128), nullable=True)
+    reply_received_at = Column(DateTime(timezone=True), nullable=True)
+
+    job = relationship("Job", back_populates="outreach")
+
+# ─────────────────────────────────────────────
+# 13. AI Process Cache
+# ─────────────────────────────────────────────
+class AIProcessCache(Base):
+    __tablename__ = "ai_process_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cache_key = Column(String(256), unique=True, index=True) # e.g. "classify:{job_hash}"
+    response_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)

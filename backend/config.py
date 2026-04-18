@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(..., env="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(..., env="TELEGRAM_CHAT_ID")
 
+    # Scraper APIs
+    adzuna_app_id: Optional[str] = Field(default=None, env="ADZUNA_APP_ID")
+    adzuna_app_key: Optional[str] = Field(default=None, env="ADZUNA_APP_KEY")
+    jooble_api_key: Optional[str] = Field(default=None, env="JOOBLE_API_KEY")
+
     # Database
     database_url: str = Field(
         default="sqlite+aiosqlite:///./data/job_automater.db",
@@ -39,17 +44,35 @@ class Settings(BaseSettings):
         default="Software Engineer,Frontend Developer,Backend Developer,Full Stack Developer,AI Engineer",
         env="SEARCH_KEYWORDS"
     )
+    scrape_mode: str = Field(default="local", env="SCRAPE_MODE") # local | cloud
+    salary_minimum: int = Field(default=60000, env="SALARY_MINIMUM")
+    target_seniority: str = Field(default="junior,mid,senior", env="TARGET_SENIORITY")
+    
     scrape_delay: float = Field(default=2.0, env="SCRAPE_DELAY")
     user_agent: str = Field(
         default="JobAutomater/1.0 (Personal job search tool)",
         env="USER_AGENT"
     )
 
+    # Candidate profile (for form filling)
+    candidate_first_name: str = Field(default="", env="CANDIDATE_FIRST_NAME")
+    candidate_last_name: str = Field(default="", env="CANDIDATE_LAST_NAME")
+    candidate_email: str = Field(default="", env="CANDIDATE_EMAIL")
+    candidate_phone: str = Field(default="", env="CANDIDATE_PHONE")
+    candidate_linkedin: str = Field(default="", env="CANDIDATE_LINKEDIN")
+    candidate_github: str = Field(default="", env="CANDIDATE_GITHUB")
+
+    # Feature flags
+    enable_enrichment: bool = Field(default=True, env="ENABLE_ENRICHMENT")
+    enable_autofill: bool = Field(default=True, env="ENABLE_AUTOFILL")
+    enable_embeddings: bool = Field(default=True, env="ENABLE_EMBEDDINGS")
+
     # Resumes
     resume_dir: str = Field(default="./data/resumes", env="RESUME_DIR")
 
     # Application mode
     application_mode: str = Field(default="draft", env="APPLICATION_MODE")
+    email_outreach_interval_days: int = Field(default=60, env="EMAIL_OUTREACH_INTERVAL_DAYS")
 
     # Email (optional)
     email_host: Optional[str] = Field(default=None, env="EMAIL_HOST")
@@ -69,6 +92,10 @@ class Settings(BaseSettings):
     @property
     def search_keywords_list(self) -> List[str]:
         return [kw.strip() for kw in self.search_keywords.split(",") if kw.strip()]
+
+    @property
+    def target_seniority_list(self) -> List[str]:
+        return [s.strip().lower() for s in self.target_seniority.split(",") if s.strip()]
 
     class Config:
         env_file = ".env"

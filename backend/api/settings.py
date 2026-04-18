@@ -8,6 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
 from backend.models import PlatformLink, UserProfile
+from backend.config import settings
+from pydantic import BaseModel
+from typing import Optional, List
+
+router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -191,3 +196,48 @@ async def trigger_rescore():
 
     asyncio.create_task(rescore_background())
     return {"message": "Rescoring started in background... Refresh dashboard in 5 seconds."}
+# ─── Global System Config ───────────────────────────────────────────────────
+
+class ConfigUpdate(BaseModel):
+    candidate_first_name: Optional[str] = None
+    candidate_last_name: Optional[str] = None
+    candidate_email: Optional[str] = None
+    candidate_phone: Optional[str] = None
+    candidate_linkedin: Optional[str] = None
+    candidate_github: Optional[str] = None
+    scrape_mode: Optional[str] = None
+    salary_minimum: Optional[int] = None
+    target_seniority: Optional[str] = None
+    enable_embeddings: Optional[bool] = None
+    enable_enrichment: Optional[bool] = None
+
+@router.get("/config")
+async def get_config():
+    """Retrieve the current running configuration."""
+    return {
+        "candidate_first_name": settings.candidate_first_name,
+        "candidate_last_name": settings.candidate_last_name,
+        "candidate_email": settings.candidate_email,
+        "candidate_phone": settings.candidate_phone,
+        "candidate_linkedin": settings.candidate_linkedin,
+        "candidate_github": settings.candidate_github,
+        "scrape_mode": settings.scrape_mode,
+        "salary_minimum": settings.salary_minimum,
+        "target_seniority": settings.target_seniority,
+        "enable_embeddings": settings.enable_embeddings,
+        "enable_enrichment": settings.enable_enrichment,
+    }
+
+@router.patch("/config")
+async def update_config(payload: ConfigUpdate):
+    """
+    Update the running configuration. 
+    Note: These changes persist only for the current session.
+    To make them permanent, update your .env file.
+    """
+    update_data = payload.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        if hasattr(settings, key):
+            setattr(settings, key, value)
+    
+    return {"status": "updated", "config": update_data}

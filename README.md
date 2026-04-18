@@ -1,4 +1,4 @@
-# 🎯 Job Automater
+# 🎯 Job Automater (PersonaPilot)
 
 **AI-powered job search & application assistant.** Finds, ranks, and drafts tailored applications using the right resume for every job.
 
@@ -6,200 +6,158 @@
 
 ## ✨ Features
 
-- **5 scraper sources** — RemoteOK, Remotive, We Work Remotely, Indeed, Hacker News
-- **AI classification** — Gemini classifies each job: frontend, backend, fullstack, AI, devops
-- **Smart resume selection** — Matches your best resume to each job automatically
-- **Persona-aware drafts** — Cover messages adapt tone per role type (UI focus, API focus, etc.)
-- **3-layer deduplication** — Hash + URL + semantic checks prevent duplicates
-- **Weighted scoring** — Ranks jobs by skill match, role fit, recency, salary, and memory signals
-- **AI memory** — Learns from past outcomes (replies, interviews, rejections)
-- **Telegram notifications** — Structured alerts for new matches, drafts, follow-ups
-- **Kanban tracker** — Full lifecycle from drafted → offer/rejected
-- **GitHub Actions** — Automated scraping every 6 hours
+-   **5+ scraper sources** — RemoteOK, Remotive, We Work Remotely, Indeed, and Hacker News.
+-   **Multi-Layer Deduplication** — 3-layer filtering (Hash + URL + Semantic) to prevent duplicate applications across platforms.
+-   **Weighted AI Scoring (0–100)** — Ranks jobs by skill match, role fit, recency, and historical **AI Memory** (lessons from past results).
+-   **Persona-Aware Drafting** — Automatically chooses the right persona (Frontend, Backend, AI, etc.) and resume for every job.
+-   **"No-Hallucination" AI Engine** — Gemini-powered cover letter and bullet point generator with strict factual enforcement.
+-   **Telegram Workflow** — Unified bot for notifications, job screening, and status updates.
+-   **Kanban Tracker** — Complete lifecycle management from Drafted &rarr; Interview &rarr; Offer/Rejected.
+-   **Automated Scheduling** — Built-in Python scheduler + GitHub Actions for hands-free scraping every 6 hours.
+
+---
+
+## 📄 Documentation
+
+For a deep technical dive into architectural patterns and AI instructions, see:
+👉 **[PROJECT_GUIDE.md](./PROJECT_GUIDE.md)**
+
+---
+
+## 📁 Project Structure
+
+```text
+job_automater/
+├── backend/
+│   ├── api/                 # API Routes (Jobs, Resumes, Settings, etc.)
+│   ├── modules/
+│   │   ├── ai_engine/       # Gemini classifier, generator, and persona engine
+│   │   ├── deduplicator/    # 3-layer semantic dedup logic
+│   │   ├── scorer/          # Weighted ranking & AI memory signals
+│   │   ├── scraper/         # Multi-source job intake & normalization
+│   │   ├── resume_manager/  # Resume versioning & PDF processing
+│   │   └── notifier/        # Telegram Bot integration
+│   ├── main.py              # FastAPI entry point
+│   ├── models.py            # SQLAlchemy ORM (Jobs, Applications, Memory)
+│   ├── database.py          # Database initialization & session management
+│   ├── config.py            # Environment-driven settings
+│   └── scheduler.py         # Periodic task orchestration
+├── frontend/
+│   ├── js/                  # SPA Logic (Dashboard, Kanban, Jobs, Notifications)
+│   ├── css/                 # Modern design system (Vanilla CSS)
+│   └── index.html           # Main Application Shell
+├── data/
+│   ├── resumes/             # User resume library (PDF/DOCX)
+│   └── job_automater.db     # Local SQLite storage
+├── .github/workflows/       # GitHub Actions (CI/CD + Periodic Scrapes)
+├── scripts/                 # Utility scripts (check-limit, debug-gen, etc.)
+├── PROJECT_GUIDE.md         # Technical architecture documentation
+├── .env.example             # Clean environment template
+└── requirements.txt         # Project dependencies
+```
+
+---
+
+## 🧠 AI Decision Lifecycle
+
+1.  **Ingest:** Scraper feeds new jobs into the system.
+2.  **Filter:** Deduplicator runs checks to ensure uniqueness.
+3.  **Classify:** Gemini categorizes the role into specific **Personas**.
+4.  **Score:** Scorer ranks the job (0–100) based on persona-fit and skills.
+5.  **Alert:** If Score > 80, the **Notifier** sends a Telegram message.
+6.  **Draft:** Upon user click, the **AI Engine** generates a tailored application package.
+7.  **Optimize:** AI Memory records results (interviews/rejections) to improve future scoring.
+
+---
+
+## 📊 Database (Core Tables)
+
+| Table | High-Level Purpose |
+| :--- | :--- |
+| `jobs` | Master list of all scraped and processed job postings. |
+| `applications` | Tracks job status, selected resumes, and drafted content. |
+| `resumes` | Stores metadata and paths to tailored resume versions. |
+| `ai_memory` | Long-term memory of past application outcomes for ranking. |
+| `user_profiles` | Stores persona-based tone guidance and preferred keywords. |
+| `platform_links` | Social profiles (GitHub, LinkedIn) to inject into drafts. |
+
+---
+
+## 🚀 API Quick Reference
+
+Base URL: `http://localhost:8000/api`
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| **GET** | `/jobs` | List jobs with advanced filtering. |
+| **POST** | `/jobs/:id/draft` | Generate AI-powered cover message/subject. |
+| **PATCH** | `/jobs/:id/status` | Update job/application workflow status. |
+| **GET** | `/applications/kanban` | Fetch jobs grouped by lifecycle stage. |
+| **POST** | `/settings/scrape-now` | Manually trigger a scrape across all sources. |
+| **GET** | `/health` | Check system and database health. |
+
+---
+
+## 🔐 Safety & Standards
+
+-   **Manual Review Required:** Zero "auto-submission"—human approval is mandatory for every application.
+-   **Privacy First:** All data stays local in your SQLite database.
+-   **Persona Driven:** Your personality, tone, and links are fully customizable in Settings.
 
 ---
 
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
+- **Python 3.11+**
+- **[Google Gemini API Key](https://aistudio.google.com/)** (Free tier works perfectly)
+- **[Telegram Bot](https://t.me/BotFather)** (Optional, for mobile alerts)
 
-- Python 3.11+
-- [Google Gemini API Key](https://aistudio.google.com/) (free)
-- [Telegram Bot Token](https://t.me/BotFather) + your Chat ID
-
-### 2. Setup
-
+### 2. Installation
 ```bash
-# Clone / open the project
+# Clone the repository
+git clone https://github.com/your-username/job-automater.git
 cd "Job automater"
 
-# Create virtual environment
+# Setup virtual environment
 python -m venv venv
-venv\Scripts\activate   # Windows
-# or: source venv/bin/activate (Linux/Mac)
+venv\Scripts\activate # Windows
+source venv/bin/activate # Mac/Linux
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Copy and fill in your .env
+# Initialize environment
 copy .env.example .env
 ```
 
-### 3. Configure `.env`
-
-Open `.env` and set at minimum:
-
-```
-GEMINI_API_KEY=your_gemini_api_key_here
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-```
-
-### 4. Run
-
+### 3. Run
 ```bash
 python -m backend.main
 ```
-
 Visit: **http://localhost:8000**
 
 ---
 
-## 📁 Project Structure
+## 📲 Telegram Integration
 
-```
-job_automater/
-├── backend/
-│   ├── main.py              # FastAPI entry point
-│   ├── config.py            # Settings from .env
-│   ├── database.py          # SQLite async engine
-│   ├── models.py            # 8 ORM tables
-│   ├── scheduler.py         # APScheduler tasks
-│   └── modules/
-│       ├── scraper/         # 5 job scrapers + normalizer
-│       ├── deduplicator/    # 3-layer dedup
-│       ├── scorer/          # Weighted 0-100 scorer
-│       ├── ai_engine/       # Gemini classifier, selector, generator, memory
-│       ├── resume_manager/  # PDF/DOCX extraction + CRUD
-│       └── notifier/        # Telegram bot
-├── frontend/
-│   ├── index.html           # SPA shell
-│   ├── css/style.css        # Full design system
-│   └── js/                  # Page modules
-├── data/
-│   ├── resumes/             # Uploaded resume files
-│   └── job_automater.db     # SQLite database
-└── .github/workflows/       # GitHub Actions cron
-```
+1.  Message **[@BotFather](https://t.me/BotFather)** &rarr; `/newbot`
+2.  Copy your **API Token** and **Chat ID**.
+3.  Add them to your `.env` file:
+    ```env
+    TELEGRAM_BOT_TOKEN=your_token
+    TELEGRAM_CHAT_ID=your_id
+    ```
+4.  Run a test via the **Settings** page in the UI.
 
 ---
 
-## 🖥 UI Pages
+## ⚙️ GitHub Actions (Cron Scrape)
 
-| Page | Description |
-|------|-------------|
-| **Dashboard** | Stats, category breakdown, top-match jobs |
-| **Jobs** | Filterable list with score rings and AI draft button |
-| **Tracker** | 8-column Kanban from drafted → offer/rejected |
-| **Notifications** | Telegram message log with mark-read |
-| **Settings** | Resume upload, platform links, personas, system controls |
-
----
-
-## 🧠 AI Decision Flow
-
-```
-Job Found
-    │
-    ▼
-Classify role (Gemini)
-    │
-    ▼
-Score job (0–100)
-    │
-    ├─ < 60 → Auto-skip
-    │
-    ├─ 60-79 → Surface in UI (manual review)
-    │
-    └─ 80+ → Telegram notification + surface in UI
-                │
-                ▼
-        Select best resume (AI + skill overlap)
-                │
-                ▼
-        Generate draft (cover + bullets + subject)
-                │
-                ▼
-        YOU REVIEW → YOU DECIDE TO SEND
-```
-
----
-
-## 📲 Telegram Setup
-
-1. Message [@BotFather](https://t.me/BotFather) → `/newbot`
-2. Copy the token → set `TELEGRAM_BOT_TOKEN` in `.env`
-3. Start your bot, then visit:
-   `https://api.telegram.org/bot<TOKEN>/getUpdates`
-4. Copy the `chat.id` → set `TELEGRAM_CHAT_ID` in `.env`
-5. Test via Settings page → **Test Telegram**
-
----
-
-## 🔐 Safety Rules
-
-- ❌ **No auto-submit** — every application requires your manual approval
-- ❌ **No double-applying** — enforced by hash + URL dedup at every level
-- ❌ **Max 10 applications/day** (configurable in `.env`)
-- ✅ **Draft-first mode** — AI only drafts, you copy-paste and send
-- ✅ **Risky actions require confirmation** (deletes, skips)
-
----
-
-## ⚙️ GitHub Actions Secrets
-
-Add these in your GitHub repo → Settings → Secrets → Actions:
-
-| Secret | Description |
-|--------|-------------|
-| `GEMINI_API_KEY` | Google AI Studio key |
-| `TELEGRAM_BOT_TOKEN` | Bot token from BotFather |
-| `TELEGRAM_CHAT_ID` | Your Telegram chat ID |
-
----
-
-## 📊 Database Tables
-
-| Table | Purpose |
-|-------|---------|
-| `jobs` | All discovered jobs |
-| `applications` | Application lifecycle |
-| `resumes` | Your resume files + metadata |
-| `ai_memory` | Past outcomes for scoring |
-| `user_profiles` | Your personas/roles |
-| `platform_links` | GitHub, portfolio, etc. |
-| `notifications` | Telegram message log |
-| `scheduler_runs` | Cron run history |
-
----
-
-## 🛠 API Reference
-
-Base URL: `http://localhost:8000/api`
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/jobs` | List jobs with filters |
-| GET | `/jobs/stats` | Dashboard stats |
-| GET | `/jobs/:id` | Job detail + application |
-| POST | `/jobs/:id/draft` | Generate AI application |
-| PATCH | `/jobs/:id/status` | Update job status |
-| GET | `/applications/kanban` | Kanban grouped view |
-| PATCH | `/applications/:id` | Update application status |
-| GET | `/resumes` | List resumes |
-| POST | `/resumes/upload` | Upload resume file |
-| GET | `/settings/links` | Platform links |
-| POST | `/settings/scrape-now` | Manual scrape trigger |
-| POST | `/settings/test-telegram` | Test Telegram |
-
-Interactive docs: **http://localhost:8000/docs**
+To enable automated scraping every 6 hours in the cloud:
+1.  Go to your GitHub Repository **Settings** &rarr; **Secrets and variables** &rarr; **Actions**.
+2.  Add the following **Secrets**:
+    - `GEMINI_API_KEY`: Your Google AI key.
+    - `TELEGRAM_BOT_TOKEN`: Your bot token.
+    - `TELEGRAM_CHAT_ID`: Your chat ID.
+3.  The workflow in `.github/workflows/scrape.yml` will now run automatically.

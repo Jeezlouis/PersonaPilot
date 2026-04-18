@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.models import Resume
+from backend.modules.scorer.embeddings import get_embedding, cosine_similarity
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 genai.configure(api_key=settings.gemini_api_key)
@@ -65,36 +67,49 @@ async def select_best_resume(
         logger.warning("No active resumes found in database.")
         return None
 
-    # Fast path: only one resume
-    if len(resumes) == 1:
-        return {
-            "resume_id": resumes[0].id,
-            "resume": resumes[0],
-            "confidence": 0.7,
-            "reasoning": "Only one resume available.",
-            "match_points": [],
-        }
-
-    # Step 1: Rule-based pre-filter — exact role_type match gets priority
-    exact_matches = [r for r in resumes if r.role_type == category]
-    candidates = exact_matches if exact_matches else resumes
-
-    # Step 2: Skill overlap scoring
+    # ─── Step 1: Semantic Pre-Scoring ──────────────────────────────────────────
     scored = []
-    for resume in candidates:
-        overlap = _skill_overlap(desc, resume.skills or [])
-        scored.append((overlap, resume))
+    
+    # Get Job Embedding
+    job_vector = []
+    if settings.enable_embeddings:
+        job_vector = await get_embedding(desc[:2000], job.get("hash_id", "temp"), "job")
+
+    for resume in resumes:
+        # A. Semantic Score (0.7 weight)
+        if settings.enable_embeddings:
+            resume_vector = await get_embedding(
+                " ".join(resume.skills or []) + " " + (resume.experience_summary or ""), 
+                resume.id, 
+                "resume"
+            )
+            semantic_score = cosine_similarity(job_vector, resume_vector)
+        else:
+            semantic_score = _skill_overlap(desc, resume.skills or [])
+            
+        # B. Persona Match (0.2 weight)
+        persona_score = 1.0 if resume.role_type == category else 0.5
+        
+        # C. Recency Bonus (0.1 weight)
+        recency_bonus = 0.0
+        if resume.updated_at:
+            if (datetime.now(timezone.utc) - resume.updated_at.replace(tzinfo=timezone.utc)).days < 30:
+                recency_bonus = 1.0
+        
+        total_score = (0.7 * semantic_score) + (0.2 * persona_score) + (0.1 * recency_bonus)
+        scored.append((total_score, resume))
+
     scored.sort(key=lambda x: x[0], reverse=True)
     top_candidates = scored[:3]  # top 3 for AI review
 
-    # Step 3: AI final selection (if multiple candidates)
+    # Step 2: AI final selection
     if len(top_candidates) == 1:
-        _, best = top_candidates[0]
+        score_val, best = top_candidates[0]
         return {
             "resume_id": best.id,
             "resume": best,
-            "confidence": top_candidates[0][0],
-            "reasoning": "Best skill overlap.",
+            "confidence": score_val,
+            "reasoning": "Best semantic match.",
             "match_points": [],
         }
 
@@ -112,7 +127,10 @@ async def select_best_resume(
     )
 
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        from backend.modules.ai_engine.throttler import gemini_throttler
+        await gemini_throttler.throttle()
+
+        model = genai.GenerativeModel("models/gemini-flash-latest")
         response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(

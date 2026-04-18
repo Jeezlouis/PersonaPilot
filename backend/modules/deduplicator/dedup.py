@@ -11,18 +11,21 @@ from typing import List, Dict, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.models import Job
+from backend.models import Job, Application
+from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 def _hash_job(url: str, title: str, company: str) -> str:
-    raw = f"{url}|{title.lower().strip()}|{(company or '').lower().strip()}"
+    raw = f"{url}|{(title or '').lower().strip()}|{(company or '').lower().strip()}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
 def _normalize_title(title: str) -> str:
     """Lowercase, strip punctuation for soft comparison."""
+    if not title:
+        return ""
     import re
     return re.sub(r"[^a-z0-9\s]", "", title.lower().strip())
 
@@ -75,10 +78,8 @@ async def filter_new_jobs(
 
 async def is_already_applied(db: AsyncSession, job_id: int) -> bool:
     """
-    Check if user has already applied to this job.
-    Prevents double-applying.
+    Check if user has already applied to this specific job ID.
     """
-    from backend.models import Application
     result = await db.execute(
         select(Application).where(
             Application.job_id == job_id,
@@ -86,3 +87,52 @@ async def is_already_applied(db: AsyncSession, job_id: int) -> bool:
         )
     )
     return result.scalars().first() is not None
+
+
+async def already_applied_to_company_role(
+    db: AsyncSession, 
+    company: str, 
+    title: str
+) -> bool:
+    """
+    Check if user has already applied to this company for a similar role.
+    Uses normalized company name + title similarity cross-check.
+    """
+    if not company or not title:
+        return False
+
+    norm_company = (company or "").lower().strip()
+    norm_title = _normalize_title(title)
+
+    # Simple similarity: match by prefix or contain for now.
+    # A more robust check could use trigram similarity if on PostgreSQL with pg_trgm.
+    # For SQLite, we'll fetch recently applied jobs and compare in Python.
+    
+    result = await db.execute(
+        select(Job.title, Job.company, Application.created_at, Application.status)
+        .join(Application, Job.id == Application.job_id)
+        .where(Application.status.notin_(["rejected", "ghosted"]))
+    )
+    
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    interval = timedelta(days=settings.email_outreach_interval_days)
+
+    for row_title, row_company, row_created, row_status in result.fetchall():
+        if (row_company or "").lower().strip() == norm_company:
+            # 1. Title Similarity Check
+            if _normalize_title(row_title) == norm_title:
+                logger.warning(f"Duplicate application detected: Already applied to '{title}' @ '{company}'")
+                return True
+            
+            # 2. Time-based domain check (Anti-spam)
+            # Ensure row_created is timezone aware
+            created_at = row_created
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+                
+            if now - created_at < interval:
+                logger.warning(f"Anti-spam check: Already contacted '{company}' in the last {settings.email_outreach_interval_days} days.")
+                return True
+                
+    return False

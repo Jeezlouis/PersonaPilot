@@ -11,6 +11,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import Resume, AIMemory, UserProfile
+from backend.modules.scorer.embeddings import get_embedding, cosine_similarity
+from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +24,49 @@ WEIGHT_RECENCY     = 0.15
 WEIGHT_SALARY      = 0.10
 WEIGHT_MEMORY      = 0.10
 
+HALF_LIFE_DAYS = 90
+
 
 def _tokenize(text: str) -> set:
     """Extract lowercase words from text."""
     return set(re.findall(r"[a-z][a-z0-9+#.]*", text.lower()))
+
+
+def _detect_seniority(title: str, text: str) -> str:
+    """Detect seniority level with a focus on Title first."""
+    title_lower = title.lower()
+    desc_lower = (text or "").lower()[:2000] # Only check first 2000 chars of desc
+    
+    # 1. Title Bypass: If title explicitly says junior/mid, it wins
+    if any(k in title_lower for k in ["junior", "jr.", "jr ", "entry", "associate", "intern"]):
+        return "junior"
+    if any(k in title_lower for k in ["mid", "intermediate"]):
+        return "mid"
+        
+    # 2. Check Title for higher seniority
+    if any(k in title_lower for k in ["lead", "principal", "staff", "architect", "manager", "head of", "director"]):
+        return "lead"
+    if any(k in title_lower for k in ["senior", "sr.", "sr ", "expert"]):
+        return "senior"
+
+    # 3. Fallback to Description (but only for high seniority words)
+    # We check description for senior/lead but with prefix "junior" check first
+    if any(k in desc_lower for k in ["lead", "principal", "staff", "architect"]):
+        return "lead"
+    if any(k in desc_lower for k in ["senior", "expert"]):
+        return "senior"
+        
+    return "mid" # Default to mid if nothing else found
+
+
+def _decayed_weight(outcome_date: datetime, base_weight: float) -> float:
+    """Reduce the influence of old outcomes exponentially (half-life)."""
+    import math
+    if outcome_date.tzinfo is None:
+        outcome_date = outcome_date.replace(tzinfo=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - outcome_date).days
+    decay = math.exp(-math.log(2) * max(age_days, 0) / HALF_LIFE_DAYS)
+    return base_weight * decay
 
 
 def _skill_match_score(job_desc: str, resume_skills: List[str]) -> float:
@@ -103,34 +144,50 @@ def _memory_boost(
     job_keywords: set,
 ) -> float:
     """
-    Adjust score based on past AI memory outcomes.
-    Positive outcomes (reply, interview, offer) → boost.
-    Negative outcomes (rejected, spam) → penalize.
+    Adjust score based on past AI memory outcomes with temporal decay.
     """
     if not memory_entries:
         return 0.5
     total_weight = 0.0
-    count = 0
+    total_decayed_count = 0.0
+    
     for entry in memory_entries:
         if entry["role_category"] != job_category:
             continue
+            
         overlap = len(set(entry.get("keywords", [])) & job_keywords)
         if overlap == 0:
             continue
+            
         outcome = entry.get("outcome", "neutral")
-        if outcome == "positive":
-            total_weight += 1.0
-        elif outcome == "negative":
-            total_weight -= 0.5
-        else:
-            total_weight += 0.5
-        count += 1
-
-    if count == 0:
+        raw_val = 1.0 if outcome == "positive" else (-0.5 if outcome == "negative" else 0.5)
+        
+        # Apply Temporal Decay
+        weight = _decayed_weight(entry["created_at"], raw_val)
+        total_weight += weight
+        total_decayed_count += 1.0 # Or use absolute count for denominator
+        
+    if total_decayed_count == 0:
         return 0.5
-    raw = total_weight / count
+        
+    raw = total_weight / total_decayed_count
     return max(0.0, min(1.0, (raw + 1.0) / 2.0))
 
+
+GLOBAL_HIRE_SIGNALS = [
+    "worldwide", "globally", "anywhere in the world",
+    "all timezones", "async-first", "fully distributed",
+    "open to all locations", "location independent",
+    "we hire globally", "international team",
+    "using deel", "using remote.com", "using rippling"
+]
+
+def _worldwide_boost(text: str) -> float:
+    """Check for global-friendly hiring signals and return a score boost."""
+    text_lower = (text or "").lower()
+    if any(signal in text_lower for signal in GLOBAL_HIRE_SIGNALS):
+        return 0.10  # +10 points
+    return 0.0
 
 async def score_job(
     job_data: Dict[str, Any],
@@ -139,8 +196,18 @@ async def score_job(
     pref_max: int = 200000,
 ) -> float:
     """
-    Main scoring function. Returns a 0-100 score for a job.
+    Main scoring function. Implements the 'Expensive Filter' pipeline.
     """
+    title = job_data.get("title", "")
+    desc = job_data.get("description", "") or ""
+    
+    # ─── 🏃 Cheap Filter 1: Seniority ──────────────────────────────────────────
+    seniority = _detect_seniority(title, desc)
+    target_seniorities = settings.target_seniority_list
+    if target_seniorities and seniority not in target_seniorities:
+        logger.info(f"[Scorer] Filtered by seniority: {title} ({seniority} not in {target_seniorities})")
+        return 0.0
+
     # Fetch all active resumes
     resumes_result = await db.execute(
         select(Resume).where(Resume.is_active == True)
@@ -154,10 +221,9 @@ async def score_job(
     profiles = profiles_result.scalars().all()
     preferred_categories = [p.persona for p in profiles]
 
-    # Fetch recent AI memories (last 90 days)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+    # Fetch recent AI memories
     memory_result = await db.execute(
-        select(AIMemory).where(AIMemory.created_at >= cutoff)
+        select(AIMemory)
     )
     memories = memory_result.scalars().all()
     memory_data = [
@@ -165,20 +231,34 @@ async def score_job(
             "role_category": m.role_category,
             "keywords": m.keywords or [],
             "outcome": m.outcome,
+            "created_at": m.created_at,
         }
         for m in memories
     ]
 
-    desc = job_data.get("description", "") or ""
     job_category = job_data.get("role_category", "other")
-    job_tokens = _tokenize(f"{job_data.get('title', '')} {desc}")
+    job_tokens = _tokenize(f"{title} {desc}")
 
-    # Best skill match across all resumes
-    skill_scores = [
-        _skill_match_score(desc, resume.skills or [])
-        for resume in resumes
-    ]
-    skill_score = max(skill_scores) if skill_scores else 0.0
+    # ─── 🧠 Semantic Skill Match (Expensive) ───────────────────────────────────
+    # Phase 3A: Embeddings based match
+    if settings.enable_embeddings:
+        job_vector = await get_embedding(desc[:2000], job_data.get("hash_id", "temp"), "job")
+        skill_scores = []
+        for resume in resumes:
+            resume_vector = await get_embedding(
+                " ".join(resume.skills or []) + " " + (resume.experience_summary or ""), 
+                resume.id, 
+                "resume"
+            )
+            skill_scores.append(cosine_similarity(job_vector, resume_vector))
+        skill_score = max(skill_scores) if skill_scores else 0.0
+    else:
+        # Fallback to keyword overlap
+        skill_scores = [
+            _skill_match_score(desc, resume.skills or [])
+            for resume in resumes
+        ]
+        skill_score = max(skill_scores) if skill_scores else 0.0
 
     role_score = _role_match_score(job_category, preferred_categories)
     recency_score = _recency_score(job_data.get("posted_at"))
@@ -189,6 +269,7 @@ async def score_job(
         pref_max,
     )
     memory_score = _memory_boost(memory_data, job_category, job_tokens)
+    worldwide_boost = _worldwide_boost(desc)
 
     raw_score = (
         WEIGHT_SKILL_MATCH * skill_score
@@ -196,11 +277,12 @@ async def score_job(
         + WEIGHT_RECENCY * recency_score
         + WEIGHT_SALARY * salary_score
         + WEIGHT_MEMORY * memory_score
+        + worldwide_boost # Direct addition for specific signals
     )
 
     final_score = round(raw_score * 100, 1)
     logger.debug(
         f"Score: {final_score} | skill={skill_score:.2f} role={role_score:.2f} "
-        f"recency={recency_score:.2f} salary={salary_score:.2f} memory={memory_score:.2f}"
+        f"recency={recency_score:.2f} salary={salary_score:.2f} memory={memory_score:.2f} world={worldwide_boost:.2f}"
     )
     return final_score

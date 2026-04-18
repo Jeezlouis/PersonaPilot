@@ -39,6 +39,8 @@ data/*.sqlite
 
 # Resumes (personal data)
 data/resumes/
+data/gmail_token.json
+data/credentials.json
 
 # Logs
 *.log

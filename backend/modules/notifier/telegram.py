@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 import httpx
+import os
+import json
 
 from backend.config import settings
 
@@ -123,6 +125,100 @@ async def notify_daily_digest(stats: Dict[str, Any]) -> None:
         f"Open the dashboard to review."
     )
     await _send_message(message)
+
+
+async def notify_review_form(
+    job_id: int, 
+    title: str, 
+    company: str, 
+    screenshot_path: str,
+    form_url: str
+) -> bool:
+    """
+    Send a screenshot of the pre-filled form to Telegram for manual approval.
+    Includes inline buttons for Apply/Edit/Reject.
+    """
+    if not settings.telegram_bot_token or not os.path.exists(screenshot_path):
+        return False
+
+    url = f"{TELEGRAM_API}/sendPhoto"
+    
+    # Text Caption
+    caption = (
+        f"📝 <b>Review Application Form</b>\n"
+        f"{'━' * 24}\n"
+        f"🎯 <b>{title}</b> @ {company}\n"
+        f"🔗 <a href='{form_url}'>Open Form Link</a>\n\n"
+        f"The form has been pre-filled. Review the screenshot below and approve the submission."
+    )
+
+    # Inline Keyboard
+    # Since we don't have a webhook, these could be deep links to the local UI.
+    # For now, we'll provide the link to the dashboard.
+    reply_markup = {
+        "inline_keyboard": [[
+            {"text": "✅ Approve", "url": f"{settings.app_host}:{settings.app_port}/jobs/{job_id}?action=approve"},
+            {"text": "📋 Edit", "url": f"{settings.app_host}:{settings.app_port}/jobs/{job_id}"},
+            {"text": "❌ Skip", "callback_data": f"skip_{job_id}"}
+        ]]
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            with open(screenshot_path, "rb") as photo:
+                files = {"photo": photo}
+                data = {
+                    "chat_id": settings.telegram_chat_id,
+                    "caption": caption,
+                    "parse_mode": "HTML",
+                    "reply_markup": json.dumps(reply_markup)
+                }
+                resp = await client.post(url, data=data, files=files)
+                resp.raise_for_status()
+                return True
+    except Exception as e:
+        logger.error(f"Telegram photo send failed: {e}")
+        return False
+
+
+async def notify_email_approval(job_id: int, title: str, company: str, to: str, subject: str, body_preview: str, resume_name: str) -> bool:
+    """Send an email draft to Telegram for manual approval."""
+    if not settings.telegram_bot_token:
+        return False
+        
+    caption = (
+        f"📧 <b>Cold Email Draft Ready</b>\n"
+        f"{'━' * 24}\n"
+        f"🎯 <b>{title}</b> @ {company}\n"
+        f"To: {to}\n"
+        f"Subject: <code>{subject}</code>\n"
+        f"Resume: {resume_name}\n\n"
+        f"<b>Preview:</b>\n<i>{body_preview}</i>"
+    )
+    
+    reply_markup = {
+        "inline_keyboard": [[
+            {"text": "📨 Send Now", "url": f"http://localhost:{settings.app_port}/api/jobs/{job_id}/email/send"},
+            {"text": "❌ Skip", "url": f"http://localhost:{settings.app_port}/api/jobs/{job_id}/email/skip"}
+        ]]
+    }
+    
+    url = f"{TELEGRAM_API}/sendMessage"
+    payload = {
+        "chat_id": settings.telegram_chat_id,
+        "text": caption,
+        "parse_mode": "HTML",
+        "reply_markup": json.dumps(reply_markup),
+        "disable_web_page_preview": True,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            return True
+    except Exception as e:
+        logger.error(f"Telegram email approval send failed: {e}")
+        return False
 
 
 async def test_connection() -> bool:

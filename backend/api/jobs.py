@@ -9,6 +9,11 @@ from datetime import datetime, timezone, timedelta
 
 from backend.database import get_db
 from backend.models import Job, Application
+from backend.config import settings
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -156,7 +161,7 @@ async def get_job(job_id: int, db: AsyncSession = Depends(get_db)):
 
     job_dict = _job_to_dict(job)
 
-    # Check if application exists
+    # 1. Check if standard application exists
     app_result = await db.execute(
         select(Application).where(Application.job_id == job_id)
         .order_by(desc(Application.created_at))
@@ -175,6 +180,20 @@ async def get_job(job_id: int, db: AsyncSession = Depends(get_db)):
             "created_at": app.created_at.isoformat() if app.created_at else None,
         }
 
+    # 2. Check if email outreach exists
+    await db.refresh(job, ["outreach"])
+    outreach = job.outreach[0] if job.outreach else None
+    job_dict["email_outreach"] = None
+    if outreach:
+        job_dict["email_outreach"] = {
+            "id": outreach.id,
+            "recipient": outreach.recipient_email,
+            "subject": outreach.subject,
+            "body": outreach.body,
+            "status": outreach.status,
+            "resume_used": outreach.resume_used
+        }
+
     return job_dict
 
 
@@ -190,12 +209,14 @@ async def update_job_status(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    valid_statuses = ["new", "reviewed", "shortlisted", "skipped"]
     new_status = payload.get("status")
-    if new_status not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+    if new_status == "skipped":
+        job.status = "skipped"
+        await db.commit()
+        return {"id": job_id, "status": "skipped"}
 
     job.status = new_status
+    await db.commit()
     return {"id": job_id, "status": new_status}
 
 
@@ -270,3 +291,113 @@ async def draft_application(job_id: int, db: AsyncSession = Depends(get_db)):
         "cover_message": content["cover_message"],
         "tailored_bullets": content.get("tailored_bullets", []),
     }
+
+
+@router.post("/{job_id}/autofill")
+async def autofill_job(job_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Trigger the Playwright form filler.
+    Pre-fills the form, takes a screenshot, and sends to Telegram for review.
+    """
+    from backend.modules.automator.form_filler import prefill_form
+    from backend.modules.notifier.telegram import notify_review_form
+
+    # 1. Get Job and Application Draft
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalars().first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    app_result = await db.execute(select(Application).where(Application.job_id == job_id))
+    app = app_result.scalars().first()
+    
+    # If no draft exists, create one first
+    if not app:
+        logger.info(f"[API] No draft found for job {job_id}. Creating one now...")
+        draft_res = await draft_application(job_id, db)
+        app_id = draft_res["application_id"]
+        # Reload app
+        app = await db.get(Application, app_id)
+
+    # 2. Trigger Playwright
+    # We need the local file path for the resume
+    from backend.models import Resume
+    resume = await db.get(Resume, app.resume_id)
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+        
+    resume_path = os.path.join(settings.resume_dir, resume.file_path)
+    
+    logger.info(f"[API] Starting Playwright autofill for job {job_id}...")
+    result = await prefill_form(
+        job_url=job.url,
+        resume_path=resume_path,
+        cover_letter=app.cover_message
+    )
+
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=f"Autofill failed: {result['error']}")
+
+    # 3. Notify Telegram with Screenshot
+    await notify_review_form(
+        job_id=job.id,
+        title=job.title,
+        company=job.company or "Unknown",
+        screenshot_path=result["screenshot_path"],
+        form_url=result["page_url"]
+    )
+
+    return {
+        "status": "success",
+        "ats": result.get("ats"),
+        "screenshot": result.get("screenshot_path"),
+        "message": "Form pre-filled and sent to Telegram for review."
+    }
+
+from fastapi.responses import HTMLResponse
+
+@router.get("/{job_id}/email/send")
+async def send_email_outreach(job_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Trigger sending the drafted cold email.
+    """
+    from backend.models import EmailOutreach
+    from backend.modules.mailer.gmail_sender import send_cold_email
+    
+    # 1. Fetch outreach draft
+    res = await db.execute(select(EmailOutreach).where(EmailOutreach.job_id == job_id))
+    outreach = res.scalars().first()
+    
+    if not outreach:
+        return HTMLResponse("<h1>Error: Outreach not found</h1>")
+        
+    if outreach.status == "sent":
+        return HTMLResponse("<h1>Already Sent</h1><p>This email was already dispatched.</p>")
+        
+    try:
+        msg_id = send_cold_email(
+            to_email=outreach.recipient_email,
+            subject=outreach.subject,
+            body=outreach.body,
+            resume_path=outreach.resume_used
+        )
+        outreach.status = "sent"
+        outreach.gmail_message_id = msg_id
+        await db.commit()
+        return HTMLResponse("<h1>Email Sent Successfully!</h1><p>You can close this tab.</p>")
+    except Exception as e:
+        return HTMLResponse(f"<h1>Error sending email</h1><p>{e}</p>")
+
+@router.get("/{job_id}/email/skip")
+async def skip_email_outreach(job_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Mark an email draft as skipped.
+    """
+    from backend.models import Job, EmailOutreach
+    j_res = await db.execute(select(Job).where(Job.id == job_id))
+    job = j_res.scalars().first()
+    if job:
+        await db.delete(job)
+        
+    await db.commit()
+    return HTMLResponse("<h1>Job Deleted</h1><p>You can close this tab.</p>")

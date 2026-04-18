@@ -10,10 +10,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from datetime import datetime, timezone, timedelta
 
 from backend.database import init_db
 from backend.scheduler import setup_scheduler, scheduler
-from backend.api import jobs, applications, resumes, settings, notifications
+from backend.api import jobs, applications, resumes, settings, notifications, gmail
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -140,12 +141,63 @@ app.include_router(applications.router)
 app.include_router(resumes.router)
 app.include_router(settings.router)
 app.include_router(notifications.router)
+app.include_router(gmail.router)
 
 
 # ─── Health Check ─────────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0"}
+    """Enhanced health check with live system stats."""
+    from backend.database import AsyncSessionLocal
+    from backend.models import PendingJob, ScrapeRun, SchedulerRun
+    from sqlalchemy import select, func, or_
+    import google.generativeai as genai
+    from backend.config import settings
+
+    stats = {
+        "status": "ok",
+        "version": "1.0.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "services": {},
+        "queue": {}
+    }
+
+    async with AsyncSessionLocal() as db:
+        # 1. Queue Depth (Pending + Processing)
+        stats["queue"]["pending"] = await db.scalar(
+            select(func.count(PendingJob.id)).where(PendingJob.status.in_(["pending", "processing"]))
+        )
+        stats["queue"]["failed_last_24h"] = await db.scalar(
+            select(func.count(PendingJob.id)).where(
+                PendingJob.status == "failed", 
+                PendingJob.queued_at >= datetime.now(timezone.utc) - timedelta(days=1)
+            )
+        )
+
+        # 2. Last Scrape status (from SchedulerRun)
+        last_scrape = await db.execute(
+            select(SchedulerRun)
+            .where(SchedulerRun.task_name == "job_scraper")
+            .order_by(SchedulerRun.started_at.desc())
+            .limit(1)
+        )
+        ls = last_scrape.scalars().first()
+        stats["last_scrape"] = {
+            "time": ls.started_at.isoformat() if ls else None,
+            "status": ls.status if ls else "none",
+            "found": ls.jobs_found if ls else 0
+        }
+
+        # 3. Gemini Health
+        try:
+            # Quick list_models check to verify API key
+            genai.configure(api_key=settings.gemini_api_key)
+            # We don't want to actually call a model to save tokens, just verify config
+            stats["services"]["gemini"] = "connected"
+        except Exception:
+            stats["services"]["gemini"] = "error"
+
+    return stats
 
 
 # ─── Static Frontend ──────────────────────────────────────────────────────────
@@ -156,6 +208,9 @@ if os.path.exists(FRONTEND_DIR):
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
         """Serve frontend SPA for all non-API routes."""
+        if full_path.startswith("api/"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="API route not found")
         index = os.path.join(FRONTEND_DIR, "index.html")
         return FileResponse(index)
 
@@ -170,5 +225,7 @@ if __name__ == "__main__":
         host=settings.app_host,
         port=settings.app_port,
         reload=settings.debug,
+        reload_dirs=["backend"], # Only watch the code, not the data or logs
+        reload_excludes=["*.db", "*.db-wal", "*.db-shm", "*.log", "data/*", "logs/*"],
         log_level="info",
     )

@@ -128,6 +128,15 @@ def normalize(
     Normalize a raw job into the common schema dict.
     Returns a dict matching the Job model columns.
     """
+    # Ensure posted_at is a datetime object (handles restoration from JSON string)
+    if isinstance(posted_at, str):
+        try:
+            # Handle potential 'Z' or other ISO variants
+            dt_str = posted_at.replace('Z', '+00:00')
+            posted_at = datetime.fromisoformat(dt_str)
+        except (ValueError, TypeError):
+            posted_at = datetime.now(timezone.utc)
+
     desc_full = f"{title} {company or ''} {description or ''}".strip()
 
     salary_min, salary_max = extract_salary(description or "")
@@ -138,6 +147,15 @@ def normalize(
     # Prioritize remote tagging
     if job_type == "remote":
         job_type = "remote"
+
+    import math
+    def _clean_num(v):
+        if v is None: return None
+        try:
+            f = float(v)
+            if math.isnan(f) or math.isinf(f): return None
+            return f
+        except: return None
 
     return {
         "source": source,
@@ -150,8 +168,8 @@ def normalize(
         "employment_type": employment_type,
         "role_category": role_category,
         "description": description,
-        "salary_min": salary_min,
-        "salary_max": salary_max,
+        "salary_min": _clean_num(salary_min),
+        "salary_max": _clean_num(salary_max),
         "posted_at": posted_at,
         "found_at": datetime.now(timezone.utc),
         "status": "new",

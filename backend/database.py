@@ -3,6 +3,7 @@ database.py — SQLite async engine + session factory + Base.
 """
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import event
 from backend.config import settings
 import logging
 
@@ -19,6 +20,17 @@ engine = create_async_engine(
     echo=settings.debug,
     connect_args={"check_same_thread": False},
 )
+
+
+# On every new connection, set WAL mode and tuning
+@event.listens_for(engine.sync_engine, "connect")
+def set_wal_mode(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA cache_size=-64000")  # 64MB cache
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 # Session factory
 AsyncSessionLocal = async_sessionmaker(
